@@ -1,0 +1,21 @@
+# Python artifacts
+__pycache__/
+*.pyc
+.mypy_cache/
+.pytest_cache/
+
+# Environments
+.env
+.venv/
+
+# Build outputs
+dist/
+build/
+
+# Poetry
+poetry.lock
+
+# Docker
+*.log
+.DS_Store
+enrichment_config.yml

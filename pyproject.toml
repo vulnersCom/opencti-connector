@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "opencti-connector"
+version = "0.1.0"
+description = "Vulners enrichment connector for OpenCTI"
+license = "MIT"
+readme = "README.md"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.13"
+pycti = ">=6.0.0,<7.0.0"
+requests = "^2.32.3"
+PyYAML = ">=6.0.3,<7.0"
+pydantic = "^2.9.2"
+vulners = ">=3.0.0,<4.0.0"
+
+[tool.poetry.scripts]
+vulners-enrichment-connector = "enrichment_connector:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
