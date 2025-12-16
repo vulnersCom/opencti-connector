@@ -23,7 +23,7 @@ deploy:prod:
   extends: .deploy_template_argocd
   needs: ["build"]
   variables:
-    APP: spechound
+    APP: vulners_opencti_connector
     TARGET_IMAGE: ${COMMIT_IMAGE}
 
 sync:prod:
