@@ -1,0 +1,32 @@
+include:
+  - project: 'vulners/infra/gitlab-ci'
+    ref: main
+    file: deploy.yaml
+
+variables:
+  IMAGE_TAG: ${CI_COMMIT_SHORT_SHA}
+  COMMIT_IMAGE: ${CI_REGISTRY_IMAGE}:${IMAGE_TAG}
+  LATEST_IMAGE: ${CI_REGISTRY_IMAGE}:latest
+
+stages:
+  - build
+  - deploy
+  - sync
+
+build:
+  extends: .build-template
+  variables:
+    TARGET_COMMIT_IMAGE: ${COMMIT_IMAGE}
+    TARGET_LATEST_IMAGE: ${LATEST_IMAGE}
+
+deploy:prod:
+  extends: .deploy_template_argocd
+  needs: ["build"]
+  variables:
+    APP: spechound
+    TARGET_IMAGE: ${COMMIT_IMAGE}
+
+sync:prod:
+  extends: .deploy_cluster_sync_template
+  stage: sync
+  needs: ["deploy:prod"]
