@@ -18,4 +18,3 @@ poetry.lock
 # Docker
 *.log
 .DS_Store
-enrichment_config.yml
