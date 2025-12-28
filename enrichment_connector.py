@@ -4,15 +4,12 @@ import json
 import logging
 import sys
 from functools import cached_property
-from typing import Annotated, Any
+from typing import Annotated
 
 from pycti import OpenCTIConnectorHelper  # type: ignore[import-untyped]
-from pydantic import Field, ValidationError
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from vulners import VulnersApi
-
-# Set the logging level to INFO
-logging.basicConfig(level=logging.DEBUG)
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -72,7 +69,7 @@ class Settings(BaseSettings):
     vulners_api_url: str = Field(default="https://vulners.com")
     vulners_max_tlp: str = Field(default="TLP:AMBER")
 
-    def to_opencti_config(self) -> dict[str, Any]:
+    def to_opencti_config(self) -> dict[str, object]:
         return {
             "opencti": {
                 "url": self.opencti_url,
@@ -105,19 +102,19 @@ class VulnersEnrichmentConnector:
 
     def _get_stix_from_vulners(
         self, bulletin_id: str, opencti_id: str | None = None
-    ) -> dict[str, Any] | None:
+    ) -> dict[str, object] | None:
         try:
-            data: dict[str, Any] = self.vulners_api.stix.make_bundle_by_id(
+            data: str = self.vulners_api.stix.make_bundle_by_id(
                 id=bulletin_id, opencti_id=opencti_id
             )
-            return data
+
+            return json.loads(data)
 
         except Exception as err:
             logger.error(f"HTTP error fetching STIX for {bulletin_id}: {err}")
             return None
 
-
-    def _process_message(self, data: dict[str, Any]) -> str | None:
+    def _process_message(self, data: dict[str, object]) -> str | None:
         stix_entity = data.get("stix_entity")
         stix_entity_id = data.get("stix_entity_id")
 
@@ -130,18 +127,50 @@ class VulnersEnrichmentConnector:
                 f"TLP is too high for entity {stix_entity_id!r} "
                 f"(max allowed: {self.max_tlp!r}), skipping"
             )
-            return "{}"
+            return None
 
         cve_id = stix_entity.get("name")
-        enriched_bundle = self._get_stix_from_vulners(cve_id, stix_entity["id"])
+        bundle = self._get_stix_from_vulners(cve_id, stix_entity["id"])
+        if not bundle:
+            logger.warning(f"Empty STIX bundle for {cve_id!r}, skipping")
+            return None
 
-        bundle_objects = json.dumps(enriched_bundle)
-        self._process_submission(bundle_objects)
+        # Work id is created by the platform for this enrichment operation.
+        work_id_candidate = data.get("work_id")
+        if isinstance(work_id_candidate, str) and work_id_candidate:
+            work_id: str | None = work_id_candidate
+        else:
+            # Some pycti versions keep the current work id on the helper instance.
+            helper_work_id = getattr(self.helper, "work_id", None)
+            work_id = (
+                helper_work_id if isinstance(helper_work_id, str) and helper_work_id else None
+            )
 
-        return bundle_objects
+        if not work_id:
+            logger.warning(
+                "No work_id found (neither in message nor helper); work status may stay in progress"
+            )
+            logger.debug("Incoming message keys: %s", sorted(data.keys()))
+        else:
+            logger.debug("Using work_id=%s", work_id)
 
-    def _process_submission(self, bundle_objects: str) -> list:
-        bundles_sent = self.helper.send_stix2_bundle(bundle_objects)
+        self._process_submission(bundle=bundle, work_id=work_id)
+        return None
+
+    def _process_submission(
+        self, bundle: dict[str, object], work_id: str | None
+    ) -> list[dict[str, object]]:
+        logger.info("Sending STIX bundle to OpenCTI worker")
+
+        bundles_sent = self.helper.send_stix2_bundle(
+            json.dumps(bundle),
+            work_id=work_id,
+            update=True,
+        )
+
+        if work_id:
+            # Mark the original enrichment work as processed (so it leaves `progress`).
+            self.helper.api.work.to_processed(work_id, "Enrichment completed")
         return bundles_sent
 
     def start(self) -> None:
