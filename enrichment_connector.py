@@ -3,8 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import sys
-from functools import cached_property
-from typing import Annotated
+from typing import Any
 
 from pycti import OpenCTIConnectorHelper  # type: ignore[import-untyped]
 from pydantic import Field
@@ -15,37 +14,6 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
-
-
-# --- Vulners API Monkey Patch here ---
-# todo: remove after Vulners SDK update with StixApi included
-
-from vulners.base import VulnersApiProxy, endpoint
-
-
-class StixApi(VulnersApiProxy):
-    make_bundle_by_id = endpoint(
-        "StixApi.bundle",
-        description="Make bundle of STIX objects for the given bulletin ID",
-        method="GET",
-        url="/api/v4/stix/bundle",
-        params={
-            "id": Annotated[str, Field(description="Bulletin ID")],
-            "opencti_id": Annotated[
-                str | None, Field(default=None, description="Existing OpenCTI object ID")
-            ],
-        },
-        response_handler=lambda resp: resp["result"],
-    )
-
-
-class _VulnersApi(VulnersApi):
-    @cached_property
-    def stix(self) -> StixApi:
-        return StixApi(self)
-
-
-# --- End of Vulners API Monkey Patch ---
 
 
 class Settings(BaseSettings):
@@ -93,7 +61,7 @@ class VulnersEnrichmentConnector:
 
         self.helper = OpenCTIConnectorHelper(self.settings.to_opencti_config())
 
-        self.vulners_api = _VulnersApi(
+        self.vulners_api = VulnersApi(
             self.settings.vulners_api_key,
             server_url=self.settings.vulners_api_url,
         )
@@ -102,7 +70,7 @@ class VulnersEnrichmentConnector:
 
     def _get_stix_from_vulners(
         self, bulletin_id: str, opencti_id: str | None = None
-    ) -> dict[str, object] | None:
+    ) -> dict[str, Any] | None:
         try:
             data: str = self.vulners_api.stix.make_bundle_by_id(
                 id=bulletin_id, opencti_id=opencti_id
@@ -114,14 +82,14 @@ class VulnersEnrichmentConnector:
             logger.error(f"HTTP error fetching STIX for {bulletin_id}: {err}")
             return None
 
-    def _process_message(self, data: dict[str, object]) -> str | None:
-        stix_entity = data.get("stix_entity")
+    def _process_message(self, data: dict[str, Any]) -> str | None:
+        stix_entity: dict[str, Any] | None = data.get("stix_entity")
         stix_entity_id = data.get("stix_entity_id")
 
         if not stix_entity:
             raise ValueError("No stix_entity in message")
 
-        tlp = stix_entity.get("object_marking_refs", "")
+        tlp = stix_entity.get("object_marking_refs", [""])[0]
         if tlp and not self.helper.check_max_tlp(tlp, self.max_tlp):
             logger.warning(
                 f"TLP is too high for entity {stix_entity_id!r} "
@@ -158,8 +126,8 @@ class VulnersEnrichmentConnector:
         return None
 
     def _process_submission(
-        self, bundle: dict[str, object], work_id: str | None
-    ) -> list[dict[str, object]]:
+        self, bundle: dict[str, Any], work_id: str | None
+    ) -> list[dict[str, Any]]:
         logger.info("Sending STIX bundle to OpenCTI worker")
 
         bundles_sent = self.helper.send_stix2_bundle(
