@@ -16,6 +16,39 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+# --- Vulners API Monkey Patch here ---
+# todo: remove after Vulners SDK update with StixApi included
+
+from functools import cached_property
+from typing import Annotated
+from vulners.base import VulnersApiProxy, endpoint
+
+class StixApi(VulnersApiProxy):
+    make_bundle_by_id = endpoint(
+        "StixApi.bundle",
+        description="Make bundle of STIX objects for the given bulletin ID",
+        method="GET",
+        url="/api/v4/stix/bundle",
+        params={
+            "id": Annotated[str, Field(description="Bulletin ID")],
+            "opencti_id": Annotated[
+                str | None, Field(default=None, description="Existing OpenCTI object ID")
+            ],
+        },
+        response_handler=lambda resp: resp["result"],
+    )
+
+
+class _VulnersApi(VulnersApi):
+    @cached_property
+    def stix(self) -> StixApi:
+        return StixApi(self)
+
+
+# --- End of Vulners API Monkey Patch ---
+
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -61,7 +94,7 @@ class VulnersEnrichmentConnector:
 
         self.helper = OpenCTIConnectorHelper(self.settings.to_opencti_config())
 
-        self.vulners_api = VulnersApi(
+        self.vulners_api = _VulnersApi(
             self.settings.vulners_api_key,
             server_url=self.settings.vulners_api_url,
         )
