@@ -5,6 +5,7 @@ import logging
 import sys
 from typing import Any
 
+import stix2
 from pycti import OpenCTIConnectorHelper  # type: ignore[import-untyped]
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -101,6 +102,13 @@ class VulnersEnrichmentConnector:
 
         self.max_tlp = self.settings.vulners_max_tlp
 
+    TLP_ID_TO_NAME: dict[str, str] = {
+        stix2.TLP_WHITE.id: "TLP:WHITE",
+        stix2.TLP_GREEN.id: "TLP:GREEN",
+        stix2.TLP_AMBER.id: "TLP:AMBER",
+        stix2.TLP_RED.id: "TLP:RED",
+    }
+
     def _get_stix_from_vulners(
         self, bulletin_id: str, opencti_id: str | None = None
     ) -> dict[str, Any] | None:
@@ -122,7 +130,10 @@ class VulnersEnrichmentConnector:
         if not stix_entity:
             raise ValueError("No stix_entity in message")
 
-        tlp = stix_entity.get("object_marking_refs", [""])[0]
+        tlp_refs = stix_entity.get("object_tlp_refs", [])
+        tlp_id = tlp_refs[0] if tlp_refs else ""
+        tlp = self.TLP_ID_TO_NAME.get(tlp_id, "")
+
         if tlp and not self.helper.check_max_tlp(tlp, self.max_tlp):
             logger.warning(
                 f"TLP {tlp!r} is too high for entity {stix_entity_id!r} "
@@ -136,12 +147,10 @@ class VulnersEnrichmentConnector:
             logger.warning(f"Empty STIX bundle for {cve_id!r}, skipping")
             return None
 
-        # Work id is created by the platform for this enrichment operation.
         work_id_candidate = data.get("work_id")
         if isinstance(work_id_candidate, str) and work_id_candidate:
             work_id: str | None = work_id_candidate
         else:
-            # Some pycti versions keep the current work id on the helper instance.
             helper_work_id = getattr(self.helper, "work_id", None)
             work_id = (
                 helper_work_id if isinstance(helper_work_id, str) and helper_work_id else None
@@ -170,7 +179,6 @@ class VulnersEnrichmentConnector:
         )
 
         if work_id:
-            # Mark the original enrichment work as processed (so it leaves `progress`).
             self.helper.api.work.to_processed(work_id, "Enrichment completed")
         return bundles_sent
 

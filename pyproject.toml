@@ -13,6 +13,7 @@ requests = "^2.32.3"
 pydantic = "^2.9.2"
 pydantic-settings = "^2.6.1"
 vulners = ">=3.0.0,<4.0.0"
+stix2 = "^3.0.1"
 
 [tool.poetry.scripts]
 vulners-enrichment-connector = "enrichment_connector:main"
