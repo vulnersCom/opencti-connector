@@ -125,7 +125,7 @@ class VulnersEnrichmentConnector:
         tlp = stix_entity.get("object_marking_refs", [""])[0]
         if tlp and not self.helper.check_max_tlp(tlp, self.max_tlp):
             logger.warning(
-                f"TLP is too high for entity {stix_entity_id!r} "
+                f"TLP {tlp!r} is too high for entity {stix_entity_id!r} "
                 f"(max allowed: {self.max_tlp!r}), skipping"
             )
             return None
