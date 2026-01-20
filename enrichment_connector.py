@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import sys
+import traceback
 from typing import Any
 
 import stix2
@@ -24,6 +25,7 @@ from functools import cached_property
 from typing import Annotated
 from vulners.base import VulnersApiProxy, endpoint
 
+
 class StixApi(VulnersApiProxy):
     make_bundle_by_id = endpoint(
         "StixApi.bundle",
@@ -37,6 +39,7 @@ class StixApi(VulnersApiProxy):
             ],
         },
         response_handler=lambda resp: resp["result"],
+        timeout=9999,
     )
 
 
@@ -46,8 +49,7 @@ class _VulnersApi(VulnersApi):
         return StixApi(self)
 
 
-# --- End of Vulners API Monkey Patch ---
-
+# --- End of Vulners API Monkey Patch ---гмш
 
 
 class Settings(BaseSettings):
@@ -116,11 +118,9 @@ class VulnersEnrichmentConnector:
             data: str = self.vulners_api.stix.make_bundle_by_id(
                 id=bulletin_id, opencti_id=opencti_id
             )
-
             return json.loads(data)
-
-        except Exception as err:
-            logger.error(f"HTTP error fetching STIX for {bulletin_id}: {err}")
+        except:
+            logger.error(f"HTTP error fetching STIX for {bulletin_id}: {traceback.format_exc()}")
             return None
 
     def _process_message(self, data: dict[str, Any]) -> str | None:
