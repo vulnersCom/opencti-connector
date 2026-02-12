@@ -145,7 +145,7 @@ class VulnersEnrichmentConnector:
         bundle = self._get_stix_from_vulners(cve_id, stix_entity["id"])
         if not bundle:
             logger.warning(f"Empty STIX bundle for {cve_id!r}, skipping")
-            return None
+            return "No data"
 
         work_id_candidate = data.get("work_id")
         if isinstance(work_id_candidate, str) and work_id_candidate:
@@ -165,7 +165,7 @@ class VulnersEnrichmentConnector:
             logger.debug("Using work_id=%s", work_id)
 
         self._process_submission(bundle=bundle, work_id=work_id)
-        return None
+        return "Done"
 
     def _process_submission(
         self, bundle: dict[str, Any], work_id: str | None
