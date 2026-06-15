@@ -1,24 +1,19 @@
-FROM python:3.13-slim
+FROM python:3.12-alpine
+ENV CONNECTOR_TYPE=INTERNAL_ENRICHMENT
 
-ENV POETRY_VERSION=1.8.3 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+# Copy the connector
+COPY src /opt/opencti-connector-vulners
 
-WORKDIR /app
+# Install Python modules
+# hadolint ignore=DL3003
+RUN apk update && apk upgrade && \
+    apk --no-cache add git build-base libmagic libffi-dev libxml2-dev libxslt-dev
 
-# Install build dependencies
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential curl libmagic1 file \
-    && rm -rf /var/lib/apt/lists/*
+RUN cd /opt/opencti-connector-vulners && \
+    pip3 install --no-cache-dir -r requirements.txt && \
+    apk del git build-base
 
-# Install Poetry
-RUN curl -sSL https://install.python-poetry.org | python3 - --version ${POETRY_VERSION} \
-    && ln -s /root/.local/bin/poetry /usr/local/bin/poetry
-
-COPY pyproject.toml README.md poetry.lock* /app/
-
-RUN poetry install --no-root --no-interaction --no-ansi
-
-COPY . /app
-
-CMD ["poetry", "run", "python", "enrichment_connector.py"]
+# Expose and entrypoint
+COPY entrypoint.sh /
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]
