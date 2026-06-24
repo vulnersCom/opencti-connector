@@ -66,8 +66,7 @@ header). Getting one takes a couple of minutes:
 2. Open your personal area and generate an API key.
 3. Paste it into `VULNERS_API_KEY` (see the configuration tables below).
 
-Get your key: https://vulners.com/?utm_source=opencti&utm_medium=plugin
-<!-- TODO: replace with the final key-generation URL + short instruction text (owner: Dmitry) -->
+👉 **Get your key:** [vulners.com](https://vulners.com/?utm_source=opencti&utm_medium=plugin)
 
 > Even without a paid plan the free tier returns real signals (CVSS, EPSS, CISA KEV).
 > A paid key additionally returns the full set of affected software, exploits and reports.
