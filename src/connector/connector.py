@@ -1,9 +1,8 @@
 import json
 from typing import Any
 
-from pycti import OpenCTIConnectorHelper
-
 from connector.settings import ConnectorSettings
+from pycti import OpenCTIConnectorHelper
 from vulners_client import VulnersClient
 
 
@@ -18,15 +17,6 @@ class VulnersConnector:
     the ready-made bundle through the Vulners SDK and relays it to OpenCTI via
     the helper.
     """
-
-    # Map of the standard STIX TLP marking-definition ids to their canonical
-    # TLP names, as expected by ``OpenCTIConnectorHelper.check_max_tlp``.
-    TLP_ID_TO_NAME: dict[str, str] = {
-        "marking-definition--613f2e26-407d-48c7-9eca-b8e91df99dc9": "TLP:WHITE",
-        "marking-definition--34098fce-860f-48ae-8e50-ebd3cc5e41da": "TLP:GREEN",
-        "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82": "TLP:AMBER",
-        "marking-definition--5e57c739-391a-4eb3-b6be-7d15ca92d5ed": "TLP:RED",
-    }
 
     def __init__(
         self, helper: OpenCTIConnectorHelper, settings: ConnectorSettings
@@ -45,6 +35,26 @@ class VulnersConnector:
             base_url=self.settings.vulners.api_base_url,
         )
         self.max_tlp = self.settings.vulners.max_tlp_level
+
+    @staticmethod
+    def _resolve_tlp(enrichment_entity: dict[str, Any]) -> str:
+        """
+        Resolve the TLP marking of the enriched entity.
+
+        OpenCTI resolves the entity's markings server-side and exposes them on
+        the enrichment entity under ``objectMarking`` (a list of marking
+        definitions, each carrying ``definition_type``/``definition``). An
+        entity with no TLP marking defaults to ``TLP:CLEAR`` (enrichment
+        allowed).
+
+        :param enrichment_entity: The ``enrichment_entity`` resolved by pycti.
+        :return: The canonical TLP name (e.g. ``TLP:RED``).
+        """
+        tlp = "TLP:CLEAR"
+        for marking in enrichment_entity.get("objectMarking", []) or []:
+            if marking.get("definition_type") == "TLP":
+                tlp = marking["definition"]
+        return tlp
 
     def _resolve_work_id(self, data: dict[str, Any]) -> str | None:
         """Resolve the work id from the message, falling back to the helper."""
@@ -88,19 +98,27 @@ class VulnersConnector:
         if not stix_entity:
             raise ValueError("No stix_entity in message")
 
-        tlp_refs = stix_entity.get("object_tlp_refs", [])
-        tlp_id = tlp_refs[0] if tlp_refs else ""
-        tlp = self.TLP_ID_TO_NAME.get(tlp_id, "")
+        # Resolve the entity TLP from the markings OpenCTI already resolved on
+        # the enrichment entity, then enforce the max-TLP gate before fetching
+        # or relaying any data.
+        enrichment_entity = data.get("enrichment_entity") or {}
+        tlp = self._resolve_tlp(enrichment_entity)
 
-        if tlp and not self.helper.check_max_tlp(tlp, self.max_tlp):
-            self.helper.connector_logger.warning(
-                "TLP is too high for entity, skipping",
+        if not self.helper.check_max_tlp(tlp, self.max_tlp):
+            self.helper.connector_logger.info(
+                "TLP of the entity exceeds the connector max TLP, skipping "
+                "enrichment",
                 {
                     "tlp": tlp,
                     "stix_entity_id": stix_entity_id,
                     "max_tlp": self.max_tlp,
                 },
             )
+            work_id = self._resolve_work_id(data)
+            if work_id:
+                self.helper.api.work.to_processed(
+                    work_id, "Skipped: TLP of the entity exceeds the max TLP"
+                )
             return "Skipped (TLP too high)"
 
         cve_id = stix_entity.get("name")

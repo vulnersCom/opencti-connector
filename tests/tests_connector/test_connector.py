@@ -2,12 +2,12 @@ import json
 from unittest.mock import MagicMock
 
 import pytest
-
 from connector.connector import VulnersConnector
 
-# Canonical STIX TLP marking-definition ids (see connector.TLP_ID_TO_NAME).
-TLP_AMBER_ID = "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"
-TLP_RED_ID = "marking-definition--5e57c739-391a-4eb3-b6be-7d15ca92d5ed"
+
+def _tlp_marking(definition: str) -> dict:
+    """Build a resolved OpenCTI TLP marking definition, as pycti exposes it."""
+    return {"definition_type": "TLP", "definition": definition}
 
 
 @pytest.fixture
@@ -55,6 +55,28 @@ def _build_connector(helper, settings, monkeypatch) -> VulnersConnector:
     return VulnersConnector(helper=helper, settings=settings)
 
 
+def _make_message(*, marking_definition: str | None) -> dict:
+    """
+    Build an enrichment message as pycti delivers it to the callback.
+
+    The connector reads the TLP from the resolved ``enrichment_entity``
+    (``objectMarking``), not from ``stix_entity``.
+    """
+    object_marking = [_tlp_marking(marking_definition)] if marking_definition else []
+    return {
+        "stix_entity": {
+            "id": "vulnerability--11111111-1111-1111-1111-111111111111",
+            "name": "CVE-2021-44228",
+        },
+        "stix_entity_id": "vulnerability--11111111-1111-1111-1111-111111111111",
+        "enrichment_entity": {
+            "standard_id": "vulnerability--11111111-1111-1111-1111-111111111111",
+            "objectMarking": object_marking,
+        },
+        "work_id": "work-123",
+    }
+
+
 def test_in_scope_vulnerability_sends_bundle(monkeypatch, fake_bundle):
     """A Vulnerability within max TLP triggers send_stix2_bundle with the bundle."""
     helper = _make_helper(check_max_tlp_result=True)
@@ -64,19 +86,12 @@ def test_in_scope_vulnerability_sends_bundle(monkeypatch, fake_bundle):
     # Patch the bundle fetch to return our fixture.
     monkeypatch.setattr(connector.client, "get_bundle", lambda *a, **k: fake_bundle)
 
-    data = {
-        "stix_entity": {
-            "id": "vulnerability--11111111-1111-1111-1111-111111111111",
-            "name": "CVE-2021-44228",
-            "object_tlp_refs": [TLP_AMBER_ID],
-        },
-        "stix_entity_id": "vulnerability--11111111-1111-1111-1111-111111111111",
-        "work_id": "work-123",
-    }
+    data = _make_message(marking_definition="TLP:AMBER")
 
     result = connector.process_message(data)
 
     assert result == "Done"
+    helper.check_max_tlp.assert_called_once_with("TLP:AMBER", "TLP:AMBER")
     helper.send_stix2_bundle.assert_called_once()
     sent_payload = helper.send_stix2_bundle.call_args.args[0]
     assert json.loads(sent_payload) == fake_bundle
@@ -85,6 +100,23 @@ def test_in_scope_vulnerability_sends_bundle(monkeypatch, fake_bundle):
     helper.api.work.to_processed.assert_called_once_with(
         "work-123", "Enrichment completed"
     )
+
+
+def test_no_marking_defaults_to_clear_and_enriches(monkeypatch, fake_bundle):
+    """An entity with no TLP marking defaults to TLP:CLEAR and is enriched."""
+    helper = _make_helper(check_max_tlp_result=True)
+    settings = _make_settings()
+    connector = _build_connector(helper, settings, monkeypatch)
+
+    monkeypatch.setattr(connector.client, "get_bundle", lambda *a, **k: fake_bundle)
+
+    data = _make_message(marking_definition=None)
+
+    result = connector.process_message(data)
+
+    assert result == "Done"
+    helper.check_max_tlp.assert_called_once_with("TLP:CLEAR", "TLP:AMBER")
+    helper.send_stix2_bundle.assert_called_once()
 
 
 def test_tlp_above_max_is_skipped(monkeypatch, fake_bundle):
@@ -96,22 +128,19 @@ def test_tlp_above_max_is_skipped(monkeypatch, fake_bundle):
     get_bundle = MagicMock(return_value=fake_bundle)
     monkeypatch.setattr(connector.client, "get_bundle", get_bundle)
 
-    data = {
-        "stix_entity": {
-            "id": "vulnerability--11111111-1111-1111-1111-111111111111",
-            "name": "CVE-2021-44228",
-            "object_tlp_refs": [TLP_RED_ID],
-        },
-        "stix_entity_id": "vulnerability--11111111-1111-1111-1111-111111111111",
-        "work_id": "work-123",
-    }
+    data = _make_message(marking_definition="TLP:RED")
 
     result = connector.process_message(data)
 
     assert result == "Skipped (TLP too high)"
     helper.check_max_tlp.assert_called_once_with("TLP:RED", "TLP:AMBER")
+    # No data must be fetched nor relayed when the TLP gate blocks the entity.
     get_bundle.assert_not_called()
     helper.send_stix2_bundle.assert_not_called()
+    # The work must be closed so it does not stay stuck in progress.
+    helper.api.work.to_processed.assert_called_once_with(
+        "work-123", "Skipped: TLP of the entity exceeds the max TLP"
+    )
 
 
 def test_missing_stix_entity_raises(monkeypatch):

@@ -11,11 +11,24 @@ package-mode = false
 # is kept for metadata/tooling parity only.
 [tool.poetry.dependencies]
 python = "^3.12"
-pycti = "7.260609.0"
-requests = "~2.33.0"
-pydantic = ">=2.11,<3"
+pycti = "7.260619.0"
+pydantic = ">=2.8.2,<3"
 vulners = ">=3.1.10"
 
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+# isort configuration.
+#
+# This is a standalone, root-level connector repo (src/connector, src/vulners_client).
+# Upstream OpenCTI ships these connectors inside a monorepo where isort treats the
+# connector packages as third-party (they live deep under internal-enrichment/...),
+# so the canonical import order groups `connector` / `vulners_client` together with
+# third-party imports such as `pycti`. We mirror that exact ordering here (keeping the
+# source identical to the upstream/fork copy) by declaring those packages third-party,
+# so `isort --profile black` is clean against this layout too.
+[tool.isort]
+profile = "black"
+known_third_party = ["connector", "vulners_client"]
+no_lines_before = ["LOCALFOLDER"]

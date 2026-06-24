@@ -1,3 +1,7 @@
+# NOTE: image is built from the repo root (`docker build -t opencti/connector-vulners .`).
+# The Dockerfile only COPYs `src/` and `entrypoint.sh`; everything else here just keeps
+# the build context small. Do NOT exclude `src/` or `entrypoint.sh`.
+.git/
 __pycache__/
 *.pyc
 .venv/
@@ -9,3 +13,8 @@ build/
 poetry.lock
 *.log
 .DS_Store
+
+# Secrets / local config (never ship these in the image)
+.env
+config.yml
+src/config.yml
