@@ -1,0 +1,65 @@
+name: Publish to Docker Hub
+
+# Builds the Vulners OpenCTI connector image and publishes it to the vendor
+# Docker Hub namespace `vulners/opencti-connector` (multi-arch: amd64 + arm64).
+#
+# Credentials are provisioned separately (see DOCKERHUB_PUBLISH_SETUP.md). Until the
+# `DOCKERHUB_TOKEN` repository secret exists, this workflow still runs but only *builds*
+# (no login, no push) so it stays green. Once the secret is added it logs in and pushes.
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - 'v*.*.*'
+      - '[0-9]*.[0-9]*.[0-9]*'
+  workflow_dispatch:
+
+concurrency:
+  group: docker-publish-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    env:
+      HAS_DOCKERHUB: ${{ secrets.DOCKERHUB_TOKEN != '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: vulners/opencti-connector
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=sha,format=short
+
+      - name: Log in to Docker Hub
+        if: env.HAS_DOCKERHUB == 'true'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: ${{ env.HAS_DOCKERHUB == 'true' }}
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
